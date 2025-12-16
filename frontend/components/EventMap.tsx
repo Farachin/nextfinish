@@ -1,18 +1,20 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Event } from '@/types/database'
 
 // Fix für Standard-Icons in Leaflet (next.js SSR Problem)
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-})
+if (typeof window !== 'undefined') {
+  delete (L.Icon.Default.prototype as any)._getIconUrl
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+  })
+}
 
 interface EventMapProps {
   events: Event[]
@@ -34,6 +36,13 @@ function MapCenterUpdater({ center, zoom }: { center: [number, number]; zoom?: n
 }
 
 export default function EventMap({ events, center, zoom = 6 }: EventMapProps) {
+  const [isMounted, setIsMounted] = useState(false)
+
+  // Warte bis Client-Side Rendering bereit ist
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   // Filtere Events, die Koordinaten haben
   const eventsWithCoords = events.filter(
     (event) => {
@@ -43,14 +52,18 @@ export default function EventMap({ events, center, zoom = 6 }: EventMapProps) {
       return hasLat && hasLng && isNumber
     }
   )
-  
-  // Debug
-  console.log("🗺️ EventMap Debug:")
-  console.log("Gesamt Events:", events.length)
-  console.log("Events mit Koordinaten:", eventsWithCoords.length)
 
   // Initiales Zentrum: Deutschland oder gesetztes center
   const initialCenter: [number, number] = center || [51.1657, 10.4515]
+
+  // Render nichts bis Client-Side bereit ist
+  if (!isMounted || typeof window === 'undefined') {
+    return (
+      <div className="w-full h-full rounded-xl bg-slate-200 flex items-center justify-center border border-slate-300">
+        <p className="text-slate-600">Karte wird geladen...</p>
+      </div>
+    )
+  }
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Datum unbekannt'

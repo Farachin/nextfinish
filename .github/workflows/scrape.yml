@@ -1,0 +1,30 @@
+name: Daily Scraper
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # Jeden Morgen um 4 Uhr UTC
+  workflow_dispatch: # Erlaubt manuellen Start per Button
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 supabase python-dotenv faker
+
+      - name: Run Marathon.de Scraper
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        working-directory: scripts
+        run: python scrape_marathon_de.py
+

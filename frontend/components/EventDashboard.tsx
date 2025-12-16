@@ -30,8 +30,11 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
   const [mapZoom, setMapZoom] = useState<number>(6)
   const [isSearching, setIsSearching] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  // State für aktive Radius-Suche (behält Position und Radius bei)
+  const [activeSearchCenter, setActiveSearchCenter] = useState<[number, number] | null>(null)
+  const [activeSearchRadius, setActiveSearchRadius] = useState<number | null>(null)
 
-  // Filter- und Sortier-Logik
+  // Filter- und Sortier-Logik (wendet alle Filter gemeinsam an)
   useEffect(() => {
     let events = [...initialEvents]
 
@@ -42,6 +45,23 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
         if (!event.distance) return false
         // Toleranz für kleine Unterschiede (±0.1 km)
         return Math.abs(event.distance - targetDistance) < 0.1
+      })
+    }
+
+    // Filter nach Radius (wenn aktive Suche vorhanden)
+    if (activeSearchCenter !== null && activeSearchRadius !== null) {
+      const [searchLat, searchLon] = activeSearchCenter
+      events = events.filter((event) => {
+        if (event.lat === null || event.lng === null) return false
+        
+        const distance = calculateDistance(
+          searchLat,
+          searchLon,
+          event.lat,
+          event.lng
+        )
+        
+        return distance <= activeSearchRadius
       })
     }
 
@@ -58,15 +78,17 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
     })
 
     setFilteredEvents(events)
-  }, [initialEvents, selectedDistance, sortBy])
+  }, [initialEvents, selectedDistance, sortBy, activeSearchCenter, activeSearchRadius])
 
   const handleSearch = async () => {
     if (!searchLocation.trim()) {
-      // Reset auf gefilterte Events (ohne Radius-Filter)
-      applyFilters()
+      // Reset Radius-Filter
+      setActiveSearchCenter(null)
+      setActiveSearchRadius(null)
       setMapCenter(undefined)
       setMapZoom(6)
       setError(null)
+      // Das useEffect wird automatisch alle Filter neu anwenden
       return
     }
 
@@ -100,86 +122,31 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
       const searchLat = parseFloat(searchLocationData.lat)
       const searchLon = parseFloat(searchLocationData.lon)
 
-      // Wende zuerst die normalen Filter an
-      let events = [...initialEvents]
-
-      if (selectedDistance !== 'all') {
-        const targetDistance = selectedDistance === '42.195' ? 42.195 : 21.1
-        events = events.filter((event) => {
-          if (!event.distance) return false
-          return Math.abs(event.distance - targetDistance) < 0.1
-        })
-      }
-
-      // Dann filtere nach Radius
-      const eventsInRadius = events.filter((event) => {
-        if (event.lat === null || event.lng === null) return false
-
-        const distance = calculateDistance(
-          searchLat,
-          searchLon,
-          event.lat,
-          event.lng
-        )
-
-        return distance <= searchRadius
-      })
-
-      // Sortierung anwenden
-      eventsInRadius.sort((a, b) => {
-        const dateA = a.date ? new Date(a.date).getTime() : 0
-        const dateB = b.date ? new Date(b.date).getTime() : 0
-        
-        if (sortBy === 'date_asc') {
-          return dateA - dateB
-        } else {
-          return dateB - dateA
-        }
-      })
-
-      setFilteredEvents(eventsInRadius)
+      // Setze aktive Suche (useEffect wird automatisch alle Filter anwenden)
+      setActiveSearchCenter([searchLat, searchLon])
+      setActiveSearchRadius(searchRadius)
       
       // Zentriere Karte auf Suchort
       setMapCenter([searchLat, searchLon])
       setMapZoom(searchRadius > 100 ? 7 : searchRadius > 50 ? 8 : 9)
 
-      if (eventsInRadius.length === 0) {
-        setError(`Keine Events im Umkreis von ${searchRadius} km gefunden.`)
-      }
+      // Fehler wird nach dem useEffect gesetzt, wenn keine Events gefunden wurden
+      setIsSearching(false)
     } catch (err) {
       setError('Fehler bei der Suche. Bitte versuche es erneut.')
       console.error('Search error:', err)
-    } finally {
       setIsSearching(false)
     }
   }
 
-  const applyFilters = () => {
-    let events = [...initialEvents]
-
-    // Filter nach Distanz
-    if (selectedDistance !== 'all') {
-      const targetDistance = selectedDistance === '42.195' ? 42.195 : 21.1
-      events = events.filter((event) => {
-        if (!event.distance) return false
-        return Math.abs(event.distance - targetDistance) < 0.1
-      })
+  // Setze Fehler, wenn nach Filterung keine Events vorhanden sind
+  useEffect(() => {
+    if (filteredEvents.length === 0 && activeSearchCenter !== null && activeSearchRadius !== null) {
+      setError(`Keine Events im Umkreis von ${activeSearchRadius} km gefunden.`)
+    } else if (filteredEvents.length > 0 && error && error.includes('Keine Events')) {
+      setError(null)
     }
-
-    // Sortierung
-    events.sort((a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0
-      const dateB = b.date ? new Date(b.date).getTime() : 0
-      
-      if (sortBy === 'date_asc') {
-        return dateA - dateB
-      } else {
-        return dateB - dateA
-      }
-    })
-
-    setFilteredEvents(events)
-  }
+  }, [filteredEvents.length, activeSearchCenter, activeSearchRadius, error])
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -203,11 +170,32 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
   }
 
   return (
-    <div className="flex gap-6">
+    <div className="flex gap-6 h-full min-h-0">
       {/* Sidebar: Filter & Suche (Links) */}
       <aside className="hidden lg:block w-64 flex-shrink-0">
-        <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 sticky top-24">
+          <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 sticky top-24 max-h-[calc(100vh-120px)] overflow-y-auto">
           <h2 className="text-lg font-semibold text-slate-900 mb-6">Filter & Suche</h2>
+          
+          {activeSearchCenter !== null && (
+            <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <p className="text-xs font-medium text-emerald-800 mb-1">🔍 Suche aktiv</p>
+              <p className="text-xs text-emerald-700">{searchLocation || 'Radius-Filter'}</p>
+              <p className="text-xs text-emerald-600 mt-1">{activeSearchRadius} km Radius</p>
+              <button
+                onClick={() => {
+                  setActiveSearchCenter(null)
+                  setActiveSearchRadius(null)
+                  setSearchLocation('')
+                  setMapCenter(undefined)
+                  setMapZoom(6)
+                  setError(null)
+                }}
+                className="mt-2 text-xs text-emerald-600 hover:text-emerald-800 underline"
+              >
+                Suche zurücksetzen
+              </button>
+            </div>
+          )}
 
           {/* Umkreissuche */}
           <div className="mb-8">
@@ -236,7 +224,16 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
                 max="200"
                 step="10"
                 value={searchRadius}
-                onChange={(e) => setSearchRadius(Number(e.target.value))}
+                onChange={(e) => {
+                  const newRadius = Number(e.target.value)
+                  setSearchRadius(newRadius)
+                  // Wenn aktive Suche vorhanden, Radius sofort aktualisieren
+                  if (activeSearchCenter !== null) {
+                    setActiveSearchRadius(newRadius)
+                    // Karten-Zoom anpassen
+                    setMapZoom(newRadius > 100 ? 7 : newRadius > 50 ? 8 : 9)
+                  }
+                }}
                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                 disabled={isSearching}
               />
@@ -317,21 +314,28 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
       </aside>
 
       {/* Main Content: Karte + Event-Liste */}
-      <div className="flex-1 flex flex-col gap-6">
+      <div className="flex-1 flex flex-col gap-6 min-w-0">
         {/* Karte (Oben, immer sichtbar) */}
-        <div className="w-full">
-          <div className="h-96 lg:h-[500px]">
+        <div className="w-full flex-shrink-0">
+          <div className="h-80 lg:h-96">
             <EventMap events={filteredEvents} center={mapCenter} zoom={mapZoom} />
           </div>
         </div>
 
         {/* Event-Liste (Unten) */}
-        <div className="flex-1">
-          <div className="bg-white rounded-xl shadow-md border border-slate-200 p-4 sm:p-6">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="bg-white rounded-xl shadow-md border border-slate-200 p-4 sm:p-6 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Events ({filteredEvents.length})
-              </h2>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Events ({filteredEvents.length})
+                </h2>
+                {activeSearchCenter !== null && activeSearchRadius !== null && (
+                  <p className="text-sm text-emerald-600 mt-1">
+                    🔍 Suche aktiv: {searchLocation || 'Aktiver Radius-Filter'} ({activeSearchRadius} km)
+                  </p>
+                )}
+              </div>
               
               {/* Mobile Filter Toggle (für kleine Screens) */}
               <div className="lg:hidden flex gap-2">
@@ -373,7 +377,16 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
                   max="200"
                   step="10"
                   value={searchRadius}
-                  onChange={(e) => setSearchRadius(Number(e.target.value))}
+                  onChange={(e) => {
+                    const newRadius = Number(e.target.value)
+                    setSearchRadius(newRadius)
+                    // Wenn aktive Suche vorhanden, Radius sofort aktualisieren
+                    if (activeSearchCenter !== null) {
+                      setActiveSearchRadius(newRadius)
+                      // Karten-Zoom anpassen
+                      setMapZoom(newRadius > 100 ? 7 : newRadius > 50 ? 8 : 9)
+                    }
+                  }}
                   className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                 />
                 <span className="text-xs text-slate-600 w-16">{searchRadius} km</span>
@@ -392,9 +405,32 @@ export default function EventDashboard({ initialEvents }: EventDashboardProps) {
               )}
             </div>
             
-            <div className="space-y-4 max-h-[calc(100vh-700px)] lg:max-h-[calc(100vh-800px)] overflow-y-auto pr-2">
+            <div className="space-y-4 flex-1 overflow-y-auto pr-2 min-h-0">
               {filteredEvents.length === 0 ? (
-                <p className="text-slate-600 text-center py-8">Keine Events gefunden.</p>
+                <div className="text-center py-8">
+                  <p className="text-slate-600 mb-2">Keine Events gefunden.</p>
+                  {activeSearchCenter !== null && activeSearchRadius !== null && (
+                    <p className="text-sm text-slate-500">
+                      Versuche einen größeren Radius oder eine andere Stadt.
+                    </p>
+                  )}
+                  {(selectedDistance !== 'all' || activeSearchCenter !== null) && (
+                    <button
+                      onClick={() => {
+                        setSelectedDistance('all')
+                        setActiveSearchCenter(null)
+                        setActiveSearchRadius(null)
+                        setSearchLocation('')
+                        setMapCenter(undefined)
+                        setMapZoom(6)
+                        setError(null)
+                      }}
+                      className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                    >
+                      Filter zurücksetzen
+                    </button>
+                  )}
+                </div>
               ) : (
                 filteredEvents.map((event) => {
                   const dateInfo = formatDate(event.date)

@@ -28,8 +28,10 @@ export default async function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <EventDashboard initialEvents={eventsList} />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-[calc(100vh-80px)] flex flex-col">
+        <div className="flex-1 min-h-0">
+          <EventDashboard initialEvents={eventsList} />
+        </div>
       </main>
     </div>
   )
